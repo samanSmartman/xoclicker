@@ -129,6 +129,8 @@ class ClickerService : AccessibilityService() {
         val promptFile = File(dir, "prompt.txt")
         if (!promptFile.exists()) { fail("no prompt.txt"); return }
         val prompt = promptFile.readText()
+        val START = cfg.optString("start", "XOSTART_7")
+        val END = cfg.optString("end", "XOEND_7")
         val promptEnds = prompt.split(END).size - 1
 
         val i = Intent(Intent.ACTION_VIEW, Uri.parse(cfg.getString("url")))
