@@ -1,7 +1,11 @@
 package com.xo.clicker
 
 import android.accessibilityservice.AccessibilityService
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
@@ -132,26 +136,45 @@ class ClickerService : AccessibilityService() {
         startActivity(i)
         Thread.sleep(cfg.optLong("wait_ms", 5000))
 
-        val input = waitFor(30000) {
-            nodes().firstOrNull { it.isEditable && !isUrlBar(it) }
-        }
-        if (input == null) { fail("input box not found"); return }
-        input.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
-        val args = Bundle()
-        args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, prompt)
-        input.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
-        Thread.sleep(1500)
-
         val sendText = cfg.optString("send_text", "")
         val sendDesc = cfg.optString("send_desc", "")
-        val send = waitFor(15000) {
-            nodes().firstOrNull {
-                (sendText.isNotEmpty() && it.text?.toString() == sendText) ||
-                (sendDesc.isNotEmpty() && it.contentDescription?.toString().equals(sendDesc, true))
-            }
+        fun findSend() = nodes().firstOrNull {
+            (sendText.isNotEmpty() && it.text?.toString() == sendText) ||
+            (sendDesc.isNotEmpty() && it.contentDescription?.toString().equals(sendDesc, true))
         }
-        if (send == null) { fail("send button not found"); return }
-        clickUp(send)
+        fun findInput() = nodes().firstOrNull { it.isEditable && !isUrlBar(it) }
+        var send: AccessibilityNodeInfo? = null
+        var lastInput: AccessibilityNodeInfo? = null
+        for (attempt in 1..4) {
+            val input = waitFor(30000) { findInput() }
+            if (input == null) { fail("input box not found"); return }
+            lastInput = input
+            input.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+            input.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            Thread.sleep(500)
+            if (attempt % 2 == 1) {
+                val args = Bundle()
+                args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, prompt)
+                input.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+            } else {
+                val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                cm.setPrimaryClip(ClipData.newPlainText("xo", prompt))
+                input.performAction(AccessibilityNodeInfo.ACTION_PASTE)
+            }
+            Thread.sleep(2000)
+            send = waitFor(5000) { findSend() }
+            if (send != null) break
+            log("attempt $attempt: no send button")
+        }
+        val li = lastInput
+        if (send != null) {
+            clickUp(send)
+        } else if (Build.VERSION.SDK_INT >= 30 && li != null &&
+            li.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)) {
+            log("sent via IME enter")
+        } else {
+            fail("send button not found"); return
+        }
 
         val t0 = System.currentTimeMillis()
         while (System.currentTimeMillis() - t0 < 180000) {
