@@ -26,7 +26,7 @@ class ClickerService : AccessibilityService() {
     private val poll = object : Runnable {
         override fun run() {
             try { tick() } catch (e: Exception) { log("tick error: $e") }
-            h.postDelayed(this, 1000)
+            h.postDelayed(this, 200)
         }
     }
 
@@ -45,6 +45,7 @@ class ClickerService : AccessibilityService() {
         if (!job.exists()) return
         val name = job.readText().trim()
         job.delete()
+        log("job started: $name")
         busy = true
         Thread {
             try { runJob(name) }
@@ -98,7 +99,7 @@ class ClickerService : AccessibilityService() {
         while (System.currentTimeMillis() - t0 < ms) {
             val r = f()
             if (r != null) return r
-            Thread.sleep(500)
+            Thread.sleep(150)
         }
         return null
     }
@@ -153,7 +154,7 @@ class ClickerService : AccessibilityService() {
             lastInput = input
             input.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
             input.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-            Thread.sleep(500)
+            Thread.sleep(200)
             if (attempt % 2 == 1) {
                 val args = Bundle()
                 args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, prompt)
@@ -163,7 +164,7 @@ class ClickerService : AccessibilityService() {
                 cm.setPrimaryClip(ClipData.newPlainText("xo", prompt))
                 input.performAction(AccessibilityNodeInfo.ACTION_PASTE)
             }
-            Thread.sleep(2000)
+            Thread.sleep(400)
             send = waitFor(5000) { findSend() }
             if (send != null) break
             log("attempt $attempt: no send button")
@@ -180,7 +181,7 @@ class ClickerService : AccessibilityService() {
 
         val t0 = System.currentTimeMillis()
         while (System.currentTimeMillis() - t0 < 180000) {
-            Thread.sleep(2000)
+            Thread.sleep(500)
             val sb = StringBuilder()
             for (n in nodes()) {
                 if (n.isEditable) continue
