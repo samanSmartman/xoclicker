@@ -35,8 +35,22 @@ class ClickerService : AccessibilityService() {
     override fun onInterrupt() {}
     override fun onDestroy() { h.removeCallbacks(poll); super.onDestroy() }
 
+    @Volatile private var jobStart = 0L
+
+    private fun cancelled(): Boolean = File(dir, "cancel.txt").exists()
+
+    private fun sleepC(ms: Long): Boolean {
+        val t = System.currentTimeMillis()
+        while (System.currentTimeMillis() - t < ms) {
+            if (cancelled()) return true
+            Thread.sleep(100)
+        }
+        return false
+    }
+
     private fun log(s: String) {
-        try { File(dir, "log.txt").appendText(s + "\n") } catch (_: Exception) {}
+        val sec = if (jobStart > 0) String.format("%.1f", (System.currentTimeMillis() - jobStart) / 1000.0) else "-"
+        try { File(dir, "log.txt").appendText("[" + sec + "s] " + s + "\n") } catch (_: Exception) {}
     }
 
     private fun tick() {
@@ -45,6 +59,8 @@ class ClickerService : AccessibilityService() {
         if (!job.exists()) return
         val name = job.readText().trim()
         job.delete()
+        File(dir, "cancel.txt").delete()
+        jobStart = System.currentTimeMillis()
         log("job started: $name")
         busy = true
         Thread {
@@ -74,10 +90,12 @@ class ClickerService : AccessibilityService() {
     private fun isUrlBar(n: AccessibilityNodeInfo) = n.viewIdResourceName?.endsWith("url_bar") == true
 
     private fun fail(why: String) {
+        if (cancelled()) { log("cancelled (error skipped: $why)"); return }
         writeResult("XOERR: $why")
     }
 
     private fun writeResult(t: String) {
+        if (cancelled()) return
         val tmp = File(dir, "result.tmp")
         tmp.writeText(t)
         tmp.renameTo(File(dir, "result.txt"))
@@ -97,6 +115,7 @@ class ClickerService : AccessibilityService() {
     private fun waitFor(ms: Long, f: () -> AccessibilityNodeInfo?): AccessibilityNodeInfo? {
         val t0 = System.currentTimeMillis()
         while (System.currentTimeMillis() - t0 < ms) {
+            if (cancelled()) return null
             val r = f()
             if (r != null) return r
             Thread.sleep(150)
@@ -137,7 +156,9 @@ class ClickerService : AccessibilityService() {
         val i = Intent(Intent.ACTION_VIEW, Uri.parse(cfg.getString("url")))
             .setPackage(CHROME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         startActivity(i)
-        Thread.sleep(cfg.optLong("wait_ms", 5000))
+        log("chrome opened, waiting wait_ms")
+        if (sleepC(cfg.optLong("wait_ms", 5000))) { log("cancelled"); return }
+        log("wait_ms done")
 
         val sendText = cfg.optString("send_text", "")
         val sendDesc = cfg.optString("send_desc", "")
@@ -149,8 +170,10 @@ class ClickerService : AccessibilityService() {
         var send: AccessibilityNodeInfo? = null
         var lastInput: AccessibilityNodeInfo? = null
         for (attempt in 1..4) {
+            if (cancelled()) { log("cancelled"); return }
             val input = waitFor(30000) { findInput() }
             if (input == null) { fail("input box not found"); return }
+            log("attempt $attempt: input found")
             lastInput = input
             input.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
             input.performAction(AccessibilityNodeInfo.ACTION_CLICK)
@@ -164,6 +187,7 @@ class ClickerService : AccessibilityService() {
                 cm.setPrimaryClip(ClipData.newPlainText("xo", prompt))
                 input.performAction(AccessibilityNodeInfo.ACTION_PASTE)
             }
+            log("attempt $attempt: text set (prompt " + prompt.length + " chars)")
             Thread.sleep(400)
             send = waitFor(5000) { findSend() }
             if (send != null) break
@@ -172,6 +196,7 @@ class ClickerService : AccessibilityService() {
         val li = lastInput
         if (send != null) {
             clickUp(send)
+            log("send clicked")
         } else if (Build.VERSION.SDK_INT >= 30 && li != null &&
             li.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)) {
             log("sent via IME enter")
@@ -181,7 +206,7 @@ class ClickerService : AccessibilityService() {
 
         val t0 = System.currentTimeMillis()
         while (System.currentTimeMillis() - t0 < 180000) {
-            Thread.sleep(500)
+            if (sleepC(500)) { log("cancelled"); return }
             val sb = StringBuilder()
             for (n in nodes()) {
                 if (n.isEditable) continue
@@ -192,7 +217,9 @@ class ClickerService : AccessibilityService() {
                 val s = all.lastIndexOf(START)
                 val e = all.indexOf(END, if (s >= 0) s else 0)
                 if (s >= 0 && e > s) {
+                    log("result found, page text " + all.length + " chars")
                     writeResult(all.substring(s, e + END.length))
+                    log("result written")
                     return
                 }
             }
