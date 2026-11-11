@@ -37,6 +37,22 @@ class ClickerService : AccessibilityService() {
 
     @Volatile private var jobStart = 0L
 
+    private fun backToTelegram() {
+        for (pkg in listOf("org.telegram.messenger", "org.telegram.messenger.web", "org.thunderdog.challegram")) {
+            try {
+                val back = Intent(Intent.ACTION_MAIN)
+                    .addCategory(Intent.CATEGORY_LAUNCHER)
+                    .setPackage(pkg)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                startActivity(back)
+                log("back to $pkg")
+                return
+            } catch (e: Exception) {
+                // this Telegram app is not installed, try the next one
+            }
+        }
+    }
+
     private fun cancelled(): Boolean = File(dir, "cancel.txt").exists()
 
     private fun sleepC(ms: Long): Boolean {
@@ -66,7 +82,7 @@ class ClickerService : AccessibilityService() {
         Thread {
             try { runJob(name) }
             catch (e: Exception) { log("job error: $e"); fail("exception") }
-            finally { busy = false }
+            finally { backToTelegram(); busy = false }
         }.start()
     }
 
@@ -171,7 +187,18 @@ class ClickerService : AccessibilityService() {
         var lastInput: AccessibilityNodeInfo? = null
         for (attempt in 1..4) {
             if (cancelled()) { log("cancelled"); return }
-            val input = waitFor(30000) { findInput() }
+            var lastLaunch = System.currentTimeMillis()
+            val input = waitFor(30000) {
+                val found = findInput()
+                if (found == null && System.currentTimeMillis() - lastLaunch > 4000) {
+                    lastLaunch = System.currentTimeMillis()
+                    if (chromeRoot() == null) {
+                        log("chrome not in front, reopening")
+                        startActivity(i)
+                    }
+                }
+                found
+            }
             if (input == null) { fail("input box not found"); return }
             log("attempt $attempt: input found")
             lastInput = input
