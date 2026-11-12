@@ -154,7 +154,7 @@ class ClickerService : AccessibilityService() {
         return false
     }
 
-    private fun runJob(name: String) {
+    private fun runJob(name: String, retry: Int = 0) {
         if (name == "dump") {
             val l = nodes()
             val sb = StringBuilder()
@@ -248,6 +248,8 @@ class ClickerService : AccessibilityService() {
             fail("send button not found"); return
         }
 
+        var errTries = 0
+        var lastErr = 0L
         val t0 = System.currentTimeMillis()
         while (System.currentTimeMillis() - t0 < 180000) {
             if (sleepC(500)) { log("cancelled"); return }
@@ -257,6 +259,44 @@ class ClickerService : AccessibilityService() {
                 n.text?.let { sb.append(it).append("\n") }
             }
             val all = sb.toString()
+            val noResult = all.split(END).size - 1 < promptEnds + 1
+            val errNow = noResult &&
+                (all.contains("Failed to generate content") || all.contains("Permission denied. Please check your account")) &&
+                !prompt.contains("Failed to generate content") && !prompt.contains("Permission denied")
+            if (errNow && System.currentTimeMillis() - lastErr > 5000) {
+                if (errTries >= 2) { log("site error persists"); fail("site error persists"); return }
+                errTries++
+                lastErr = System.currentTimeMillis()
+                val hit = { c: CharSequence? ->
+                    val t = c?.toString() ?: "-"
+                    t.length < 40 && (t.contains("retry", true) || t.contains("rerun", true) || t.contains("re-run", true) || t.contains("regenerate", true))
+                }
+                fun findRetry() = nodes().firstOrNull { !it.isEditable && (hit(it.text) || hit(it.contentDescription)) }
+                var rb = findRetry()
+                if (rb == null) {
+                    val errNode = nodes().firstOrNull { !it.isEditable && it.text?.toString()?.contains("Permission denied. Please check") == true }
+                    if (errNode != null) {
+                        val c = clickUp(errNode)
+                        log("clicked error message to reveal toolbar: " + c)
+                        Thread.sleep(600)
+                        rb = findRetry()
+                    }
+                }
+                if (rb != null && clickUp(rb)) {
+                    log("site error seen, clicked retry (" + errTries + ")")
+                    continue
+                }
+                val labels = nodes().filter { it.isClickable }
+                    .mapNotNull { (it.text ?: it.contentDescription)?.toString() }
+                    .filter { it.length < 40 }.take(30)
+                log("site error seen, no retry button; clickable: " + labels.joinToString(" | "))
+                if (retry < 1) {
+                    if (sleepC(1500)) { log("cancelled"); return }
+                    runJob(name, retry + 1)
+                    return
+                }
+                fail("site error"); return
+            }
             if (all.split(END).size - 1 >= promptEnds + 1) {
                 val s = all.lastIndexOf(START)
                 val e = all.indexOf(END, if (s >= 0) s else 0)
