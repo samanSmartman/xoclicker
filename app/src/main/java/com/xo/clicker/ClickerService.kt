@@ -226,6 +226,20 @@ class ClickerService : AccessibilityService() {
             if (send != null) break
             log("attempt $attempt: no send button")
         }
+        // stale-result guard
+        fun lastBlock(t: String): String {
+            val x = t.lastIndexOf(START)
+            if (x < 0) return ""
+            val y = t.indexOf(END, x)
+            return if (y > x) t.substring(x, y + END.length) else ""
+        }
+        val sb0 = StringBuilder()
+        for (n in nodes()) { if (n.isEditable) continue; n.text?.let { sb0.append(it).append("\n") } }
+        val baseAll = sb0.toString()
+        val baseEnds = baseAll.split(END).size - 1
+        val baseBlock = lastBlock(baseAll)
+        var lastScroll = 0L
+        log("baseline: ends=" + baseEnds)
         val li = lastInput
         if (send != null) {
             val head = prompt.trim().take(30)
@@ -259,7 +273,9 @@ class ClickerService : AccessibilityService() {
                 n.text?.let { sb.append(it).append("\n") }
             }
             val all = sb.toString()
-            val noResult = all.split(END).size - 1 < promptEnds + 1
+            val curEnds = all.split(END).size - 1
+            val fresh = curEnds >= promptEnds + 1 && (curEnds > baseEnds || lastBlock(all) != baseBlock)
+            val noResult = !fresh
             val errNow = noResult &&
                 (all.contains("Failed to generate content") || all.contains("Permission denied. Please check your account")) &&
                 !prompt.contains("Failed to generate content") && !prompt.contains("Permission denied")
@@ -299,7 +315,11 @@ class ClickerService : AccessibilityService() {
                 }
                 fail("site error"); return
             }
-            if (all.split(END).size - 1 >= promptEnds + 1) {
+            if (!fresh && System.currentTimeMillis() - lastScroll > 2500) {
+                lastScroll = System.currentTimeMillis()
+                nodes().filter { it.isScrollable }.forEach { it.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD) }
+            }
+            if (fresh) {
                 val s = all.lastIndexOf(START)
                 val e = all.indexOf(END, if (s >= 0) s else 0)
                 if (s >= 0 && e > s) {
