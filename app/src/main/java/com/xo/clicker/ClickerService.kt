@@ -177,10 +177,33 @@ class ClickerService : AccessibilityService() {
 
         val i = Intent(Intent.ACTION_VIEW, Uri.parse(cfg.getString("url")))
             .setPackage(CHROME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        startActivity(i)
-        log("chrome opened, waiting wait_ms")
-        if (sleepC(cfg.optLong("wait_ms", 5000))) { log("cancelled"); return }
-        log("wait_ms done")
+        val siteKey = (Uri.parse(cfg.getString("url")).host ?: "").removePrefix("www.").substringBefore(".")
+        fun onSite(): Boolean {
+            val l = nodes()
+            return l.any { isUrlBar(it) && it.text?.toString()?.contains(siteKey, true) == true } &&
+                l.any { it.isEditable && !isUrlBar(it) }
+        }
+        var reuse = false
+        if (retry == 0) {
+            if (onSite()) reuse = true
+            else {
+                try {
+                    startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+                        .setPackage(CHROME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                } catch (e: Exception) {}
+                reuse = waitFor(2500) { if (onSite()) nodes().firstOrNull() else null } != null
+                if (!reuse) log("no open chat found; url bar: " + (nodes().firstOrNull { isUrlBar(it) }?.text ?: "-"))
+            }
+        }
+        if (reuse) {
+            log("chat: reusing the open page")
+            if (sleepC(300)) { log("cancelled"); return }
+        } else {
+            startActivity(i)
+            log("chat: opening a new page, waiting wait_ms")
+            if (sleepC(cfg.optLong("wait_ms", 5000))) { log("cancelled"); return }
+            log("wait_ms done")
+        }
 
         val sendText = cfg.optString("send_text", "")
         val sendDesc = cfg.optString("send_desc", "")
@@ -280,7 +303,10 @@ class ClickerService : AccessibilityService() {
                 (all.contains("Failed to generate content") || all.contains("Permission denied. Please check your account")) &&
                 !prompt.contains("Failed to generate content") && !prompt.contains("Permission denied")
             if (errNow && System.currentTimeMillis() - lastErr > 3000 && nodes().none { it.isClickable && (it.text ?: it.contentDescription)?.toString().equals("Stop", true) }) {
-                if (errTries >= 2) { log("site error persists"); fail("site error persists"); return }
+                if (errTries >= 2) {
+                    if (retry < 1) { log("site error persists, opening a new chat"); runJob(name, retry + 1); return }
+                    log("site error persists"); fail("site error persists"); return
+                }
                 errTries++
                 lastErr = System.currentTimeMillis()
                 nodes().firstOrNull { it.isClickable && (it.text ?: it.contentDescription)?.toString().equals("Dismiss", true) }?.let { clickUp(it); log("dismissed error toast") }
