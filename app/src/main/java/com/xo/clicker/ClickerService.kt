@@ -263,10 +263,11 @@ class ClickerService : AccessibilityService() {
             val errNow = noResult &&
                 (all.contains("Failed to generate content") || all.contains("Permission denied. Please check your account")) &&
                 !prompt.contains("Failed to generate content") && !prompt.contains("Permission denied")
-            if (errNow && System.currentTimeMillis() - lastErr > 5000) {
+            if (errNow && System.currentTimeMillis() - lastErr > 3000 && nodes().none { it.isClickable && (it.text ?: it.contentDescription)?.toString().equals("Stop", true) }) {
                 if (errTries >= 2) { log("site error persists"); fail("site error persists"); return }
                 errTries++
                 lastErr = System.currentTimeMillis()
+                nodes().firstOrNull { it.isClickable && (it.text ?: it.contentDescription)?.toString().equals("Dismiss", true) }?.let { clickUp(it); log("dismissed error toast") }
                 val hit = { c: CharSequence? ->
                     val t = c?.toString() ?: "-"
                     t.length < 40 && (t.contains("retry", true) || t.contains("rerun", true) || t.contains("re-run", true) || t.contains("regenerate", true))
@@ -290,6 +291,7 @@ class ClickerService : AccessibilityService() {
                     .mapNotNull { (it.text ?: it.contentDescription)?.toString() }
                     .filter { it.length < 40 }.take(30)
                 log("site error seen, no retry button; clickable: " + labels.joinToString(" | "))
+                if (errTries >= 2) { log("retry already clicked, still waiting"); continue }
                 if (retry < 1) {
                     if (sleepC(1500)) { log("cancelled"); return }
                     runJob(name, retry + 1)
