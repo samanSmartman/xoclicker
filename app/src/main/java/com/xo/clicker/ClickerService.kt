@@ -228,8 +228,19 @@ class ClickerService : AccessibilityService() {
         }
         val li = lastInput
         if (send != null) {
-            clickUp(send)
-            log("send clicked")
+            val head = prompt.trim().take(30)
+            var sent = false
+            for (k in 1..6) {
+                val sb2 = findSend()
+                var ok = false
+                if (sb2 != null && sb2.isEnabled) ok = clickUp(sb2)
+                log("send try " + k + ": found=" + (sb2 != null) + " enabled=" + (sb2?.isEnabled == true) + " click=" + ok)
+                if (sleepC(1500)) { log("cancelled"); return }
+                val inp2 = findInput()
+                val still = inp2?.text?.toString()?.contains(head) == true
+                if (!still) { sent = true; break }
+            }
+            log(if (sent) "send confirmed" else "send not confirmed")
         } else if (Build.VERSION.SDK_INT >= 30 && li != null &&
             li.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)) {
             log("sent via IME enter")
