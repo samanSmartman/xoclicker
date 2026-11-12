@@ -87,6 +87,12 @@ class ClickerService : AccessibilityService() {
     }
 
     private fun chromeRoot(): AccessibilityNodeInfo? {
+        try {
+            for (w in windows) {
+                val r = w.root ?: continue
+                if (r.packageName?.toString() == CHROME) return r
+            }
+        } catch (e: Exception) {}
         val r = rootInActiveWindow ?: return null
         return if (r.packageName?.toString() == CHROME) r else null
     }
